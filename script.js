@@ -202,7 +202,7 @@ function addStudent() {
 function generateQRCode(id, name, section) {
     const qr = new QRious({
         element: document.getElementById('qr-code'),
-        value: id,
+        value: `${id} ${section}`,
         size: 200,
         level: 'H'
     });
@@ -325,23 +325,62 @@ function onScanSuccess(decodedText, decodedResult) {
     processAttendance(decodedText);
 }
 
-//  Modified to automatically use student's section for attendance
-function processAttendance(studentId) {
+// Helper function to extract section from QR code
+function extractSectionFromQR(qrData) {
+    // QR code format: "studentId section"
+    const parts = qrData.trim().split(' ');
+    return parts.length >= 2 ? parts[parts.length - 1] : null;
+}
+
+// Helper function to validate section match
+function validateSectionMatch(qrSection) {
+    const selectedSection = document.getElementById('scan-section-dropdown').value;
+    
+    if (!selectedSection) {
+        return { valid: false, message: "❌ Please select a section first." };
+    }
+    
+    if (qrSection !== selectedSection) {
+        return { 
+            valid: false, 
+            message: `❌ Section Mismatch! QR: ${getSectionName(qrSection)}, Selected: ${getSectionName(selectedSection)}` 
+        };
+    }
+    
+    return { valid: true, message: "✅ Section match confirmed." };
+}
+
+// Main function to process attendance after scanning
+function processAttendance(qrData) {
     const resultBox = document.getElementById('scan-result');
     resultBox.style.display = 'block';
-    resultBox.innerText = "Processing ID: " + studentId + "...";
+    resultBox.innerText = "Processing...";
     resultBox.className = "status-msg";
+
+    // Extract student ID and section from QR code
+    const parts = qrData.trim().split(' ');
+    const studentId = parts[0];
+    const qrSection = extractSectionFromQR(qrData);
+    
+    // Validate section match
+    const sectionValidation = validateSectionMatch(qrSection);
+    if (!sectionValidation.valid) {
+        resultBox.innerText = sectionValidation.message;
+        resultBox.classList.add("status-absent");
+        setTimeout(() => { if(html5QrcodeScanner) html5QrcodeScanner.resume(); }, 2500);
+        return;
+    }
 
     db.collection("students").where("student_id", "==", studentId).get()
     .then((querySnapshot) => {
-        if (querySnapshot.empty) {
-            resultBox.innerText = "❌ Student ID not found.";
-            resultBox.classList.add("status-absent");
-            setTimeout(() => { if(html5QrcodeScanner) html5QrcodeScanner.resume(); }, 2000);
-            return;
-        }
+if (querySnapshot.empty) {
+    resultBox.innerText = "❌ Student ID not found.";
+    resultBox.classList.add("status-absent");
+    setTimeout(() => { if(html5QrcodeScanner) html5QrcodeScanner.resume(); }, 2000);
+    return;
+}
 
-        const studentData = querySnapshot.docs[0].data();
+const studentData = querySnapshot.docs[0].data();
 
         // Calculate Status
         const now = new Date();
@@ -358,7 +397,7 @@ function processAttendance(studentId) {
             student_id: studentId,
             student_name: studentData.name,
             status: status,
-            section: studentData.section,
+            section: qrSection,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             date_string: new Date().toLocaleDateString()
         }).then(() => {
